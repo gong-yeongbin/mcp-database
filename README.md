@@ -1,3 +1,4 @@
+[![M8ven 라이브 인증](https://m8ven.ai/badge/mcp/gong-yeongbin-mcp-database-1oat62)](https://m8ven.ai/mcp/gong-yeongbin-mcp-database-1oat62)
 # @dudqls816/database-mcp
 
 SQL Server / PostgreSQL / MySQL 을 조회하는 MCP 서버. LLM 이 스키마를 탐색하고 쿼리를 실행할 수 있게 한다. `DATABASE_URL` 의 스킴(`mssql://` `postgres://` `mysql://`)이 드라이버를 결정한다.
