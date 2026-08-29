@@ -6,11 +6,11 @@
   "author": "공영빈 <youngbin816@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gong-yeongbin/database-mcp.git"
+    "url": "git+https://github.com/gong-yeongbin/mcp-database.git"
   },
-  "homepage": "https://github.com/gong-yeongbin/database-mcp#readme",
+  "homepage": "https://github.com/gong-yeongbin/mcp-database#readme",
   "bugs": {
-    "url": "https://github.com/gong-yeongbin/database-mcp/issues"
+    "url": "https://github.com/gong-yeongbin/mcp-database/issues"
   },
   "keywords": [
     "mcp",
