@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.2](https://github.com/gong-yeongbin/mcp-database/compare/v0.3.1...v0.3.2) (2026-08-29)
+
+### Bug Fixes
+
+* 저장소 이름 변경에 맞춰 package.json 의 URL 을 고침 ([987e168](https://github.com/gong-yeongbin/mcp-database/commit/987e168940c06b2daf9167a1fcc4d442d705ec03))
+
 ## [0.3.1](https://github.com/gong-yeongbin/mcp-database/compare/v0.3.0...v0.3.1) (2026-08-29)
 
 ### Bug Fixes
