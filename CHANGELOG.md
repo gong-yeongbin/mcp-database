@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1](https://github.com/gong-yeongbin/mcp-database/compare/v0.3.0...v0.3.1) (2026-08-29)
+
+### Bug Fixes
+
+* Node 22 에서 서버가 즉시 종료되던 실행 가드를 고침 ([7893ad0](https://github.com/gong-yeongbin/mcp-database/commit/7893ad0600b2f4fb65f5ae25ffcf89275d56016a))
+
 ## [0.3.0](https://github.com/gong-yeongbin/database-mcp/compare/v0.2.0...v0.3.0) (2026-08-06)
 
 ### Features
