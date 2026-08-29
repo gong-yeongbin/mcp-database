@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // MCP 서버 엔트리. tool 을 등록하고 stdio 로 요청을 받는다.
 
+import { realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod';
@@ -18,6 +22,10 @@ import {
     formatQueryResult,
     formatTableList,
 } from './format.ts';
+
+// serverInfo.version 은 패키지 버전과 같아야 한다. 하드코딩하면 릴리스마다 어긋난다.
+// dist/index.js 와 src/index.ts 모두 상위 디렉터리가 패키지 루트다.
+const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
 
 /** tool 핸들러의 예외를 MCP 에러 응답으로 바꾼다. DB 오류가 프로세스를 죽이면 안 된다. */
 async function guard(fn: () => Promise<string>) {
@@ -37,7 +45,7 @@ export interface ServerOpts {
 }
 
 export function buildServer(driver: Driver, opts: ServerOpts): McpServer {
-    const server = new McpServer({ name: '@dudqls816/database-mcp', version: '0.1.0' });
+    const server = new McpServer({ name: '@dudqls816/database-mcp', version });
 
     // 프로시저 호출 문법이 방언마다 다르다. T-SQL 은 EXEC, 나머지는 CALL.
     const procKeyword = opts.dialect === 'mssql' ? 'EXEC' : 'CALL';
@@ -193,8 +201,29 @@ async function main() {
     );
 }
 
+/** 심볼릭 링크(npx, node_modules/.bin)를 지나 실제 경로로 맞춘다. */
+function canonical(p: string): string {
+    try {
+        return realpathSync(p);
+    } catch {
+        // 경로를 확인할 수 없으면 비교라도 되게 절대경로로 맞춘다.
+        return path.resolve(p);
+    }
+}
+
+/**
+ * 이 파일이 직접 실행된 엔트리인지 판단한다.
+ * import.meta.main 은 최신 Node 에만 있어 Node 22 에서는 undefined 가 되고,
+ * 그러면 main() 이 호출되지 않아 서버가 조용히 종료된다.
+ */
+function isEntryPoint(): boolean {
+    const entry = process.argv[1];
+    if (!entry) return false;
+    return canonical(entry) === canonical(fileURLToPath(import.meta.url));
+}
+
 // 직접 실행할 때만 서버를 띄운다. 테스트는 buildServer 만 import 한다.
-if (import.meta.main) {
+if (isEntryPoint()) {
     main().catch((e: unknown) => {
         console.error(e instanceof Error ? e.message : String(e));
         process.exit(1);
