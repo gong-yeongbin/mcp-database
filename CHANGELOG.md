@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/gong-yeongbin/mcp-database/compare/v0.4.0...v1.0.0) (2026-10-19)
+
+### ⚠ BREAKING CHANGES
+
+* 0.4.0 에서 list_procedures / describe_procedure / call_procedure tool 이
+  제거되었다. 조회 tool 3개(list_tables, describe_table, query)만 남는다.
+
+### Features
+
+* 1.0.0 릴리스 ([0c67824](https://github.com/gong-yeongbin/mcp-database/commit/0c67824e5bd368441caed6a9cf70778be7cd0f5a))
+
 ## [0.4.0](https://github.com/gong-yeongbin/mcp-database/compare/v0.3.2...v0.4.0) (2026-10-19)
 
 ### Features
