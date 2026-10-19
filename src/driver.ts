@@ -20,39 +20,14 @@ export interface QueryResult {
     rows: unknown[][];
     /** 실제로 반환한 행 수 */
     rowCount: number;
-    /** 상한을 적용하기 전 전체 행 수 */
-    totalRows: number;
+    /** 상한에 도달해 결과를 더 받지 않았는지. 전체 행 수는 알 수 없다. */
     truncated: boolean;
-    /** 결과 집합이 여러 개였는지. 첫 번째만 반환한다. */
-    multipleResultSets: boolean;
-}
-
-export interface ProcedureRef {
-    schema: string;
-    name: string;
-    modifyDate: Date | null;
-}
-
-export interface Parameter {
-    name: string;
-    type: string;
-    maxLength: number | null;
-    isOutput: boolean;
-}
-
-/** 프로시저 실행 결과. 첫 결과 집합과 영향받은 행 수를 함께 담는다. */
-export interface ProcedureResult {
-    result: QueryResult;
-    rowsAffected: number;
 }
 
 export interface Driver {
     listTables(): Promise<TableRef[]>;
     describeTable(schema: string, table: string): Promise<Column[]>;
     query(sql: string, params: Record<string, unknown>, maxRows: number): Promise<QueryResult>;
-    listProcedures(): Promise<ProcedureRef[]>;
-    describeProcedure(schema: string, name: string): Promise<Parameter[]>;
-    callProcedure(sql: string, maxRows: number): Promise<ProcedureResult>;
     close(): Promise<void>;
 }
 
@@ -73,14 +48,6 @@ interface DialectRules {
     dollarQuotedStrings: boolean;
     /** 읽기 전용 쿼리에서 금지하는 키워드 */
     forbidden: string[];
-    /** 프로시저 호출 문의 시작 키워드 */
-    procKeywords: string[];
-    /** 프로시저 키워드 뒤에 허용하는 형태. 식별자만 허용해 동적 SQL 을 막는다. */
-    procNamePattern: RegExp;
-    /** 임의 SQL 을 실행할 수 있어 이름으로 차단하는 프로시저 */
-    dynamicProcs: string[];
-    /** 에러 메시지에 쓰는 호출 예시 */
-    procExample: string;
 }
 
 const DIALECTS: Record<DialectName, DialectRules> = {
@@ -97,23 +64,6 @@ const DIALECTS: Record<DialectName, DialectRules> = {
             'TRUNCATE', 'EXEC', 'EXECUTE', 'GRANT', 'REVOKE', 'INTO',
             'BACKUP', 'RESTORE', 'SHUTDOWN', 'RECONFIGURE', 'DBCC',
         ],
-        procKeywords: ['EXEC', 'EXECUTE'],
-        // EXEC 뒤에는 프로시저 이름이 와야 한다. 금지 형태를 열거하는 대신
-        // 허용 형태를 정의한다. EXEC('...') 는 이름 없는 동적 SQL 이라
-        // 이름 검사에 걸리지 않고 임의 SQL 을 실행한다. EXEC @sql 도
-        // 마찬가지다. 식별자만 허용하면 둘 다 막힌다.
-        //
-        // stripNoise 가 대괄호 식별자를 x 로 바꾸므로 [dbo].[Get Orders] 는
-        // 여기서 x.x 로 보인다.
-        //
-        // 이름 뒤에 문자열 리터럴이 바로 붙으면 식별자가 아니다. EXEC N'...' 의
-        // N 은 유니코드 접두사이지 프로시저 이름이 아니다. stripNoise 가 리터럴을
-        // '' 로 비우므로 그 자리를 보고 판별한다.
-        procNamePattern: /^\s+[A-Za-z_#][A-Za-z0-9_$#]*(\s*\.\s*[A-Za-z_#][A-Za-z0-9_$#]*){0,2}(?!\s*')/,
-        // sp_executesql 은 임의 SQL 을 문자열로 받아 실행하므로, 프로시저
-        // 호출만 허용한다는 전제를 무너뜨린다. 이름으로 막는다.
-        dynamicProcs: ['SP_EXECUTESQL', 'SP_SQLEXEC', 'XP_CMDSHELL'],
-        procExample: 'EXEC dbo.GetOrders @id = 1',
     },
     postgres: {
         identOpen: '"',
@@ -133,12 +83,6 @@ const DIALECTS: Record<DialectName, DialectRules> = {
             'VACUUM', 'REINDEX', 'CLUSTER', 'REFRESH', 'LOCK', 'EXECUTE',
             'PREPARE', 'DEALLOCATE',
         ],
-        procKeywords: ['CALL'],
-        procNamePattern: /^\s+[A-Za-z_][A-Za-z0-9_$]*(\s*\.\s*[A-Za-z_][A-Za-z0-9_$]*)?\s*($|\()/,
-        // PostgreSQL 의 동적 실행(EXECUTE, DO)은 CALL 구문이 아니라서
-        // 첫 토큰 검사로 이미 막힌다.
-        dynamicProcs: [],
-        procExample: 'CALL get_orders(42)',
     },
     mysql: {
         identOpen: '`',
@@ -154,13 +98,13 @@ const DIALECTS: Record<DialectName, DialectRules> = {
             'TRUNCATE', 'GRANT', 'REVOKE', 'INTO', 'CALL', 'DO', 'LOAD',
             'HANDLER', 'KILL',
         ],
-        procKeywords: ['CALL'],
-        procNamePattern: /^\s+[A-Za-z_$][A-Za-z0-9_$]*(\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)?\s*($|\()/,
-        // sys.execute_prepared_stmt 는 임의 SQL 문자열을 실행한다.
-        dynamicProcs: ['EXECUTE_PREPARED_STMT'],
-        procExample: 'CALL get_orders(42)',
     },
 };
+
+/** 금지 키워드를 `\b(A|B|...)\b` 하나로 묶는다. 호출마다 키워드 수만큼 RegExp 를 만들지 않기 위한 것이다. */
+const FORBIDDEN_RE = Object.fromEntries(
+    Object.entries(DIALECTS).map(([k, d]) => [k, new RegExp(`\\b(${d.forbidden.join('|')})\\b`)]),
+) as Record<DialectName, RegExp>;
 
 /** `--` (또는 mysql 의 `#`) 주석을 지나 줄 끝 인덱스를 돌려준다. */
 function skipLineComment(sql: string, start: number): number {
@@ -336,59 +280,9 @@ export function assertReadOnly(sql: string, dialect: DialectName): void {
         );
     }
 
-    for (const kw of DIALECTS[dialect].forbidden) {
-        if (new RegExp(`\\b${kw}\\b`).test(upper)) {
-            throw new Error(`읽기 전용 쿼리에 ${kw} 를 쓸 수 없습니다.`);
-        }
-    }
-}
-
-/**
- * 프로시저 호출 한 문장으로만 보이는지 검사한다.
- *
- * assertReadOnly 와 방향이 반대다. 여기서는 EXEC/CALL 을 허용하되 문장이
- * 하나인지만 본다. 프로시저 본문이 무엇을 하는지는 알 수 없으므로
- * 이 가드는 읽기 전용을 보장하지 않는다. 문장 이어붙이기만 막는다.
- */
-export function assertProcedureCall(sql: string, dialect: DialectName): void {
-    const d = DIALECTS[dialect];
-    const cleaned = cleanForCheck(sql, dialect);
-
-    if (!cleaned) {
-        throw new Error('빈 쿼리입니다.');
-    }
-
-    const withoutTrailing = cleaned.replace(/;\s*$/, '');
-    if (withoutTrailing.includes(';')) {
-        throw new Error(
-            `여러 문장을 한 번에 실행할 수 없습니다. call_procedure 는 ${d.procKeywords[0]} 한 문장만 받습니다.`,
-        );
-    }
-
-    const upper = withoutTrailing.toUpperCase();
-
-    const firstToken = upper.match(/^[A-Z]+/)?.[0];
-    if (!firstToken || !d.procKeywords.includes(firstToken)) {
-        throw new Error(
-            `call_procedure 는 ${d.procKeywords[0]} 로 시작해야 합니다. ` +
-                `현재: ${firstToken ?? withoutTrailing.slice(0, 20)}. 조회는 query 를 사용하세요.`,
-        );
-    }
-
-    const afterKeyword = withoutTrailing.slice(firstToken.length);
-    if (!d.procNamePattern.test(afterKeyword)) {
-        throw new Error(
-            'call_procedure 는 프로시저 이름 호출만 받습니다. ' +
-                `동적 SQL 과 변수 실행은 허용되지 않습니다. 예: ${d.procExample}`,
-        );
-    }
-
-    for (const proc of d.dynamicProcs) {
-        if (new RegExp(`\\b${proc}\\b`).test(upper)) {
-            throw new Error(
-                `${proc} 는 임의 SQL 을 실행할 수 있어 허용되지 않습니다. 프로시저를 직접 호출하세요.`,
-            );
-        }
+    const kw = FORBIDDEN_RE[dialect].exec(upper)?.[1];
+    if (kw) {
+        throw new Error(`읽기 전용 쿼리에 ${kw} 를 쓸 수 없습니다.`);
     }
 }
 

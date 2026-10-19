@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertReadOnly, assertProcedureCall, toPositionalParams } from '../src/driver.ts';
+import { assertReadOnly, toPositionalParams } from '../src/driver.ts';
 
 // --- PostgreSQL 읽기 전용 가드 ---
 
@@ -19,7 +19,7 @@ const pgAllowed = [
 ];
 
 const pgRejected: Array<[string, string]> = [
-    ['CALL do_stuff()', 'CALL 은 call_procedure 로'],
+    ['CALL do_stuff()', '프로시저 호출'],
     ["DO $$ BEGIN DELETE FROM t; END $$", 'DO 블록'],
     ["COPY t TO '/tmp/x'", 'COPY'],
     ['SELECT * INTO t2 FROM t', 'SELECT INTO'],
@@ -58,7 +58,7 @@ const myAllowed = [
 ];
 
 const myRejected: Array<[string, string]> = [
-    ['CALL do_stuff()', 'CALL 은 call_procedure 로'],
+    ['CALL do_stuff()', '프로시저 호출'],
     ["LOAD DATA INFILE 'x' INTO TABLE t", 'LOAD DATA'],
     ["SELECT * FROM t INTO OUTFILE '/tmp/x'", 'INTO OUTFILE'],
     ['SELECT 1; DROP TABLE t', '세미콜론 스태킹'],
@@ -81,52 +81,6 @@ for (const [sql, why] of myRejected) {
         assert.throws(() => assertReadOnly(sql, 'mysql'));
     });
 }
-
-// --- CALL 프로시저 가드 ---
-
-const callAllowed = [
-    'CALL get_orders(42)',
-    'call get_orders(42)',
-    'CALL get_orders',
-    'CALL get_orders;',
-    'CALL myschema.get_orders(1, 2)',
-    "CALL log_msg('sp_executesql')",
-    '-- 주석\nCALL get_orders()',
-];
-
-const callRejected: Array<[string, string]> = [
-    ['CALL p(); DROP TABLE t', '세미콜론 스태킹'],
-    ['EXEC dbo.GetOrders', 'EXEC 는 mssql 전용'],
-    ['SELECT 1', 'SELECT 은 query 로'],
-    ['DELETE FROM users', '직접 쓰기'],
-    ['CALL @v', '변수 실행'],
-    ["CALL 'x'", '문자열 실행'],
-    ['CALL (SELECT 1)', '식별자가 아닌 호출'],
-    ['CALL', '프로시저 이름 없음'],
-    ['', '빈 쿼리'],
-];
-
-for (const dialect of ['postgres', 'mysql'] as const) {
-    for (const sql of callAllowed) {
-        test(`${dialect} 프로시저 허용: ${JSON.stringify(sql)}`, () => {
-            assert.doesNotThrow(() => assertProcedureCall(sql, dialect));
-        });
-    }
-    for (const [sql, why] of callRejected) {
-        test(`${dialect} 프로시저 거부(${why}): ${JSON.stringify(sql)}`, () => {
-            assert.throws(() => assertProcedureCall(sql, dialect));
-        });
-    }
-}
-
-test('pg 는 인용 식별자 프로시저를 허용한다', () => {
-    assert.doesNotThrow(() => assertProcedureCall('CALL "My Proc"(1)', 'postgres'));
-});
-
-test('mysql 은 백틱 식별자 프로시저를 허용하고 execute_prepared_stmt 를 막는다', () => {
-    assert.doesNotThrow(() => assertProcedureCall('CALL `my proc`(1)', 'mysql'));
-    assert.throws(() => assertProcedureCall("CALL sys.execute_prepared_stmt('DROP TABLE t')", 'mysql'));
-});
 
 // --- @이름 파라미터 변환 ---
 

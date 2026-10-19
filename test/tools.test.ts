@@ -5,15 +5,7 @@ import assert from 'node:assert/strict';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { buildServer } from '../src/index.ts';
 import type { ServerOpts } from '../src/index.ts';
-import type {
-    Column,
-    Driver,
-    Parameter,
-    ProcedureRef,
-    ProcedureResult,
-    QueryResult,
-    TableRef,
-} from '../src/driver.ts';
+import type { Column, Driver, QueryResult, TableRef } from '../src/driver.ts';
 
 function stubDriver(over: Partial<Driver> = {}): Driver {
     return {
@@ -27,26 +19,7 @@ function stubDriver(over: Partial<Driver> = {}): Driver {
             columns: ['id'],
             rows: [[1]],
             rowCount: 1,
-            totalRows: 1,
             truncated: false,
-            multipleResultSets: false,
-        }),
-        listProcedures: async (): Promise<ProcedureRef[]> => [
-            { schema: 'dbo', name: 'GetOrders', modifyDate: new Date('2026-01-15T00:00:00Z') },
-        ],
-        describeProcedure: async (): Promise<Parameter[]> => [
-            { name: '@userId', type: 'int', maxLength: null, isOutput: false },
-        ],
-        callProcedure: async (): Promise<ProcedureResult> => ({
-            result: {
-                columns: ['id'],
-                rows: [[7]],
-                rowCount: 1,
-                totalRows: 1,
-                truncated: false,
-                multipleResultSets: false,
-            },
-            rowsAffected: 1,
         }),
         close: async () => {},
         ...over,
@@ -58,7 +31,6 @@ async function connect(driver: Driver, opts: Partial<ServerOpts> = {}) {
     const server = buildServer(driver, {
         maxRows: 1000,
         defaultSchema: 'dbo',
-        dialect: 'mssql',
         ...opts,
     });
     const [clientT, serverT] = InMemoryTransport.createLinkedPair();
@@ -67,15 +39,12 @@ async function connect(driver: Driver, opts: Partial<ServerOpts> = {}) {
     return { client, close: () => client.close() };
 }
 
-test('tool 6개를 노출한다', async () => {
+test('tool 3개를 노출한다', async () => {
     const { client, close } = await connect(stubDriver());
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-        'call_procedure',
-        'describe_procedure',
         'describe_table',
-        'list_procedures',
         'list_tables',
         'query',
     ]);
@@ -113,8 +82,8 @@ test('query 가 params 와 maxRows 를 드라이버로 전달한다', async () =
                 seenParams = params;
                 seenMax = maxRows;
                 return {
-                    columns: [], rows: [], rowCount: 0, totalRows: 0,
-                    truncated: false, multipleResultSets: false,
+                    columns: [], rows: [], rowCount: 0,
+                    truncated: false,
                 };
             },
         }),
@@ -135,8 +104,8 @@ test('maxRows 를 생략하면 설정값을 쓴다', async () => {
             query: async (_sql, _params, maxRows) => {
                 seenMax = maxRows;
                 return {
-                    columns: [], rows: [], rowCount: 0, totalRows: 0,
-                    truncated: false, multipleResultSets: false,
+                    columns: [], rows: [], rowCount: 0,
+                    truncated: false,
                 };
             },
         }),
@@ -171,128 +140,18 @@ test('execute tool 은 등록되지 않는다', async () => {
     await close();
 });
 
-test('call_procedure 가 sql 과 maxRows 를 드라이버로 전달한다', async () => {
-    let seenSql = '';
-    let seenMax = 0;
-    const { client, close } = await connect(
-        stubDriver({
-            callProcedure: async (sql, maxRows) => {
-                seenSql = sql;
-                seenMax = maxRows;
-                return {
-                    result: {
-                        columns: [], rows: [], rowCount: 0, totalRows: 0,
-                        truncated: false, multipleResultSets: false,
-                    },
-                    rowsAffected: 0,
-                };
-            },
-        }),
-    );
-    await client.callTool({
-        name: 'call_procedure',
-        arguments: { sql: 'EXEC dbo.GetOrders @id = 1', maxRows: 20 },
-    });
-    assert.equal(seenSql, 'EXEC dbo.GetOrders @id = 1');
-    assert.equal(seenMax, 20);
-    await close();
-});
-
-test('call_procedure 는 결과 집합과 영향받은 행을 함께 보고한다', async () => {
-    const { client, close } = await connect(stubDriver());
-    const r = await client.callTool({
-        name: 'call_procedure',
-        arguments: { sql: 'EXEC dbo.GetOrders' },
-    });
-    const text = JSON.stringify(r.content);
-    assert.match(text, /id/);
-    assert.match(text, /영향받은 행: 1/);
-    await close();
-});
-
-test('결과 집합이 없는 프로시저는 행 수만 알린다', async () => {
-    const { client, close } = await connect(
-        stubDriver({
-            callProcedure: async () => ({
-                result: {
-                    columns: [], rows: [], rowCount: 0, totalRows: 0,
-                    truncated: false, multipleResultSets: false,
-                },
-                rowsAffected: 5,
-            }),
-        }),
-    );
-    const r = await client.callTool({
-        name: 'call_procedure',
-        arguments: { sql: 'EXEC dbo.Refresh' },
-    });
-    assert.match(JSON.stringify(r.content), /완료. 영향받은 행: 5/);
-    await close();
-});
-
-test('list_procedures 가 프로시저를 렌더링한다', async () => {
-    const { client, close } = await connect(stubDriver());
-    const r = await client.callTool({ name: 'list_procedures', arguments: {} });
-    assert.match(JSON.stringify(r.content), /dbo \| GetOrders/);
-    await close();
-});
-
-test('describe_procedure 의 schema 기본값은 dbo 다', async () => {
-    let seen = '';
-    const { client, close } = await connect(
-        stubDriver({
-            describeProcedure: async (schema) => {
-                seen = schema;
-                return [];
-            },
-        }),
-    );
-    await client.callTool({ name: 'describe_procedure', arguments: { name: 'GetOrders' } });
-    assert.equal(seen, 'dbo');
-    await close();
-});
-
-test('defaultSchema 가 describe 계열의 기본값이 된다', async () => {
+test('defaultSchema 가 describe_table 의 기본값이 된다', async () => {
     let seenTable = '';
-    let seenProc = '';
     const { client, close } = await connect(
         stubDriver({
             describeTable: async (schema) => {
                 seenTable = schema;
                 return [];
             },
-            describeProcedure: async (schema) => {
-                seenProc = schema;
-                return [];
-            },
         }),
-        { defaultSchema: 'public', dialect: 'postgres' },
+        { defaultSchema: 'public' },
     );
     await client.callTool({ name: 'describe_table', arguments: { table: 'users' } });
-    await client.callTool({ name: 'describe_procedure', arguments: { name: 'get_orders' } });
     assert.equal(seenTable, 'public');
-    assert.equal(seenProc, 'public');
-    await close();
-});
-
-test('call_procedure 설명이 방언을 따른다', async () => {
-    const mssql = await connect(stubDriver());
-    const { tools: mssqlTools } = await mssql.client.listTools();
-    assert.match(mssqlTools.find((t) => t.name === 'call_procedure')?.description ?? '', /EXEC/);
-    await mssql.close();
-
-    const pg = await connect(stubDriver(), { defaultSchema: 'public', dialect: 'postgres' });
-    const { tools: pgTools } = await pg.client.listTools();
-    assert.match(pgTools.find((t) => t.name === 'call_procedure')?.description ?? '', /CALL/);
-    await pg.close();
-});
-
-test('call_procedure 는 destructiveHint 를 붙인다', async () => {
-    const { client, close } = await connect(stubDriver());
-    const { tools } = await client.listTools();
-    const call = tools.find((t) => t.name === 'call_procedure');
-    // 프로시저 본문을 알 수 없으므로 readOnly 라고 주장하면 안 된다.
-    assert.equal(call?.annotations?.readOnlyHint, undefined);
-    assert.equal(call?.annotations?.destructiveHint, true);
     await close();
 });

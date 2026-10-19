@@ -1,16 +1,9 @@
 // PostgreSQL 에 접속해 스키마 조회와 쿼리 실행을 담당하는 드라이버
 
 import pg from 'pg';
-import type {
-    Column,
-    Driver,
-    Parameter,
-    ProcedureRef,
-    ProcedureResult,
-    QueryResult,
-    TableRef,
-} from './driver.ts';
-import { assertProcedureCall, assertReadOnly, toPositionalParams } from './driver.ts';
+import Cursor from 'pg-cursor';
+import type { Column, Driver, QueryResult, TableRef } from './driver.ts';
+import { assertReadOnly, toPositionalParams } from './driver.ts';
 
 const LIST_TABLES = `
 SELECT table_schema AS "schema", table_name AS "name", table_type AS "type"
@@ -43,44 +36,16 @@ WHERE c.table_schema = $1 AND c.table_name = $2
 ORDER BY c.ordinal_position
 `;
 
-const LIST_PROCEDURES = `
-SELECT r.routine_schema AS "schema", r.routine_name AS "name", r.last_altered AS "modifyDate"
-FROM information_schema.routines r
-WHERE r.routine_type = 'PROCEDURE'
-  AND r.routine_schema NOT IN ('pg_catalog', 'information_schema')
-ORDER BY r.routine_schema, r.routine_name
-`;
-
-const DESCRIBE_PROCEDURE = `
-SELECT
-  p.parameter_name            AS "name",
-  p.data_type                 AS "type",
-  p.character_maximum_length  AS "maxLength",
-  p.parameter_mode            AS "mode",
-  p.ordinal_position          AS "ordinal"
-FROM information_schema.parameters p
-JOIN information_schema.routines r
-  ON r.specific_schema = p.specific_schema
- AND r.specific_name   = p.specific_name
-WHERE r.routine_type = 'PROCEDURE'
-  AND r.routine_schema = $1 AND r.routine_name = $2
-ORDER BY p.ordinal_position
-`;
-
-function toQueryResult(result: pg.QueryArrayResult, maxRows: number): QueryResult {
-    const all = result.rows as unknown[][];
-    const totalRows = all.length;
-    const truncated = totalRows > maxRows;
+/** 최대 maxRows+1 행을 받은 결과를 QueryResult 로 변환한다. */
+function toQueryResult(all: unknown[][], fields: pg.FieldDef[], maxRows: number): QueryResult {
+    const truncated = all.length > maxRows;
     const rows = truncated ? all.slice(0, maxRows) : all;
 
     return {
-        columns: result.fields.map((f) => f.name),
+        columns: fields.map((f) => f.name),
         rows,
         rowCount: rows.length,
-        totalRows,
         truncated,
-        // 세미콜론 가드가 다중 문장을 막으므로 결과 집합은 항상 하나다.
-        multipleResultSets: false,
     };
 }
 
@@ -138,49 +103,24 @@ export class PostgresDriver implements Driver {
         assertReadOnly(text, 'postgres');
         const bound = toPositionalParams(text, params, 'postgres');
 
-        const result = await this.getPool().query({
-            text: bound.text,
-            values: bound.values,
-            rowMode: 'array',
-        });
-        return toQueryResult(result, maxRows);
-    }
-
-    async listProcedures(): Promise<ProcedureRef[]> {
-        const result = await this.getPool().query<{
-            schema: string;
-            name: string;
-            modifyDate: Date | null;
-        }>(LIST_PROCEDURES);
-        return result.rows.map((r) => ({ ...r, modifyDate: r.modifyDate ?? null }));
-    }
-
-    async describeProcedure(schema: string, name: string): Promise<Parameter[]> {
-        const result = await this.getPool().query<{
-            name: string | null;
-            type: string;
-            maxLength: number | null;
-            mode: string;
-            ordinal: number;
-        }>(DESCRIBE_PROCEDURE, [schema, name]);
-
-        return result.rows.map((r) => ({
-            // 이름 없는 파라미터는 위치로 표기한다.
-            name: r.name ?? `$${r.ordinal}`,
-            type: r.type,
-            maxLength: r.maxLength,
-            isOutput: r.mode === 'OUT' || r.mode === 'INOUT',
-        }));
-    }
-
-    async callProcedure(text: string, maxRows: number): Promise<ProcedureResult> {
-        assertProcedureCall(text, 'postgres');
-
-        const result = await this.getPool().query({ text, rowMode: 'array' });
-        return {
-            result: toQueryResult(result, maxRows),
-            rowsAffected: result.rowCount ?? 0,
-        };
+        // 커서로 maxRows+1 행만 요청한다. 서버는 그만큼만 보내고 close 에서 포털을 닫는다.
+        // pg 내장 Query 의 rows 옵션은 suspended 되면 스스로 다시 받아서 멈출 수 없다.
+        const client = await this.getPool().connect();
+        try {
+            const cursor = client.query(new Cursor<unknown[]>(bound.text, bound.values, { rowMode: 'array' }));
+            const { rows, fields } = await new Promise<{ rows: unknown[][]; fields: pg.FieldDef[] }>(
+                (resolve, reject) => {
+                    cursor.read(maxRows + 1, (err, rows, result) => {
+                        if (err) reject(err);
+                        else resolve({ rows, fields: result.fields });
+                    });
+                },
+            );
+            await cursor.close();
+            return toQueryResult(rows, fields, maxRows);
+        } finally {
+            client.release();
+        }
     }
 
     async close(): Promise<void> {

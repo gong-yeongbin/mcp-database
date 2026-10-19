@@ -115,6 +115,8 @@ export function parseDatabaseUrl(raw: string): DbConfig {
                 max: 2,
                 idleTimeoutMillis: 30_000,
                 statement_timeout: 30_000,
+                // 기본값 0 은 무한 대기다. 호스트가 죽어 있으면 OS TCP 타임아웃까지 멈춘다.
+                connectionTimeoutMillis: 15_000,
             },
         };
     }

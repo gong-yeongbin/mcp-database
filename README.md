@@ -325,10 +325,11 @@ mydb.*`(mysql) 대신 테이블별 `GRANT SELECT` 로 좁히면 된다. 위 SQL 
 DB 가 꺼져 있어도 서버는 정상 시작하고 `claude mcp get` 이 `✔ Connected` 로 나온다. 연결
 실패는 tool 에러로 보고되고 DB 가 복구되면 다음 호출에서 회복된다.
 
-**행 상한은 출력만 줄이고 서버 작업량은 줄이지 않는다.**
-`SELECT * FROM huge_table` 은 DB 서버가 여전히 전체 결과를 만든다. 큰 테이블은 `TOP`/`LIMIT`
-이나 `WHERE` 로 직접 좁힌다. SQL Server 와 PostgreSQL 은 30초 타임아웃이 걸려 있다.
-MySQL 은 클라이언트 쪽 문장 타임아웃이 없어 서버 설정(`max_execution_time`)으로 다룬다.
+**행 상한은 전송을 끊을 뿐 서버 작업량은 줄이지 않는다.**
+`query` 는 상한을 넘는 행이 오는 순간 수신을 중단하므로 전체 결과가 네트워크를 타지는 않는다.
+하지만 `SELECT * FROM huge_table` 은 DB 서버가 여전히 전체 결과를 만든다. 큰 테이블은
+`TOP`/`LIMIT` 이나 `WHERE` 로 직접 좁힌다. 문장 실행 시간은 세 방언 모두 30초로 제한한다.
+MySQL 은 커넥션마다 `SET SESSION max_execution_time = 30000` 을 보낸다.
 
 **DECIMAL / NUMERIC 은 조용히 손실될 수 있다.**
 JS `number` 로 변환되므로 2^53 을 넘거나 scale 이 큰 값은 에러 없이 틀린다. 금액 컬럼은

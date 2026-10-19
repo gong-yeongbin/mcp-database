@@ -44,9 +44,7 @@ function result(over: Partial<QueryResult> = {}): QueryResult {
         columns: ['id', 'name'],
         rows: [[1, 'Alice'], [2, 'Bob']],
         rowCount: 2,
-        totalRows: 2,
         truncated: false,
-        multipleResultSets: false,
         ...over,
     };
 }
@@ -57,46 +55,37 @@ test('결과를 헤더 + 파이프 구분 행으로 렌더링한다', () => {
 });
 
 test('행이 없으면 명시한다', () => {
-    const out = formatQueryResult(result({ rows: [], rowCount: 0, totalRows: 0 }));
+    const out = formatQueryResult(result({ rows: [], rowCount: 0 }));
     assert.match(out, /\(행 없음\)/);
     assert.match(out, /0행\./);
 });
 
 test('잘리지 않으면 잘림 안내가 없다', () => {
-    const out = formatQueryResult(result({ rowCount: 1000, totalRows: 1000, rows: [[1, 'a']] }));
+    const out = formatQueryResult(result({ rowCount: 1000, rows: [[1, 'a']] }));
     assert.doesNotMatch(out, /잘림/);
     assert.match(out, /1,000행\./);
 });
 
-test('잘리면 반환 행과 전체 행을 모두 알린다', () => {
-    const out = formatQueryResult(
-        result({ rowCount: 1000, totalRows: 4213, truncated: true, rows: [[1, 'a']] }),
-    );
-    assert.match(out, /4,213행 중 1,000행 표시/);
-    assert.match(out, /3,213행 잘림/);
+test('잘리면 반환 행 수와 결과가 더 있다는 사실을 알린다', () => {
+    const out = formatQueryResult(result({ rowCount: 1000, truncated: true, rows: [[1, 'a']] }));
+    assert.match(out, /1,000행 표시\. 상한에 도달해 결과가 더 있습니다 \(잘림\)/);
     assert.match(out, /TOP\/LIMIT 이나 WHERE/);
 });
 
 test('상한 경계 999 / 1000 / 1001', () => {
     // 999행: 상한 1000 미달이므로 잘리지 않는다.
-    const under = formatQueryResult(result({ rowCount: 999, totalRows: 999, rows: [[1, 'a']] }));
+    const under = formatQueryResult(result({ rowCount: 999, rows: [[1, 'a']] }));
     assert.doesNotMatch(under, /잘림/);
+    assert.match(under, /999행\./);
 
-    // 정확히 1000행: 잘리지 않는다.
-    const exact = formatQueryResult(result({ rowCount: 1000, totalRows: 1000, rows: [[1, 'a']] }));
+    // 정확히 1000행: 드라이버가 1001번째 행을 받지 못했으므로 잘리지 않는다.
+    const exact = formatQueryResult(result({ rowCount: 1000, rows: [[1, 'a']] }));
     assert.doesNotMatch(exact, /잘림/);
 
-    // 1001행이 있었고 1000행만 반환: 1행 잘림.
-    const over = formatQueryResult(
-        result({ rowCount: 1000, totalRows: 1001, truncated: true, rows: [[1, 'a']] }),
-    );
-    assert.match(over, /1,001행 중 1,000행 표시/);
-    assert.match(over, /1행 잘림/);
-});
-
-test('결과 집합이 여러 개면 알린다', () => {
-    const out = formatQueryResult(result({ multipleResultSets: true }));
-    assert.match(out, /결과 집합이 여러 개였습니다\. 첫 번째만 표시합니다\./);
+    // 1001번째 행이 왔고 1000행만 반환: 잘림.
+    const over = formatQueryResult(result({ rowCount: 1000, truncated: true, rows: [[1, 'a']] }));
+    assert.match(over, /1,000행 표시/);
+    assert.match(over, /잘림/);
 });
 
 test('테이블 목록을 렌더링한다', () => {

@@ -9,7 +9,6 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "declaration": false,
-    "sourceMap": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
     // Node 24 는 relative import 에 .ts 확장자를 요구하고(네이티브 타입 스트리핑),

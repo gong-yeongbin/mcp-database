@@ -1,6 +1,6 @@
 // 쿼리 결과를 LLM 이 읽기 쉬운 텍스트로 렌더링하는 모듈
 
-import type { Column, Parameter, ProcedureRef, ProcedureResult, QueryResult, TableRef } from './driver.ts';
+import type { Column, QueryResult, TableRef } from './driver.ts';
 
 /**
  * 값 하나를 텍스트로 변환한다.
@@ -30,15 +30,11 @@ export function formatQueryResult(r: QueryResult): string {
 
     if (r.truncated) {
         notes.push(
-            `${nf.format(r.totalRows)}행 중 ${nf.format(r.rowCount)}행 표시 ` +
-                `(${nf.format(r.totalRows - r.rowCount)}행 잘림). TOP/LIMIT 이나 WHERE 로 범위를 좁히세요.`,
+            `${nf.format(r.rowCount)}행 표시. 상한에 도달해 결과가 더 있습니다 (잘림). ` +
+                'TOP/LIMIT 이나 WHERE 로 범위를 좁히세요.',
         );
     } else {
         notes.push(`${nf.format(r.rowCount)}행.`);
-    }
-
-    if (r.multipleResultSets) {
-        notes.push('결과 집합이 여러 개였습니다. 첫 번째만 표시합니다.');
     }
 
     if (r.rowCount === 0) {
@@ -63,45 +59,6 @@ export function formatTableList(tables: TableRef[]): string {
     }
     lines.push('', `${nf.format(tables.length)}개.`);
     return lines.join('\n');
-}
-
-/** 프로시저 목록을 렌더링한다. */
-export function formatProcedureList(procs: ProcedureRef[]): string {
-    if (procs.length === 0) return '프로시저가 없습니다.';
-
-    const lines = ['schema | name | modified'];
-    for (const p of procs) {
-        lines.push([p.schema, p.name, p.modifyDate === null ? '-' : p.modifyDate].map(cell).join(' | '));
-    }
-    lines.push('', `${nf.format(procs.length)}개.`);
-    return lines.join('\n');
-}
-
-/** 프로시저 파라미터를 렌더링한다. */
-export function formatParameters(schema: string, name: string, params: Parameter[]): string {
-    if (params.length === 0) {
-        return `${schema}.${name} 을 찾을 수 없거나 파라미터가 없습니다.`;
-    }
-
-    const lines = [`${schema}.${name}`, '', 'parameter | type | direction'];
-    for (const p of params) {
-        const type = p.maxLength !== null ? `${p.type}(${p.maxLength === -1 ? 'max' : p.maxLength})` : p.type;
-        lines.push([cell(p.name), cell(type), p.isOutput ? 'OUTPUT' : 'IN'].join(' | '));
-    }
-    lines.push('', `${nf.format(params.length)}개 파라미터.`);
-    return lines.join('\n');
-}
-
-/**
- * 프로시저 실행 결과를 렌더링한다.
- *
- * 결과 집합이 없는 프로시저도 있어서 행이 0이면 영향받은 행 수만 알린다.
- */
-export function formatProcedureResult(r: ProcedureResult): string {
-    if (r.result.rowCount === 0 && r.result.columns.length === 0) {
-        return `완료. 영향받은 행: ${nf.format(r.rowsAffected)}`;
-    }
-    return `${formatQueryResult(r.result)}\n영향받은 행: ${nf.format(r.rowsAffected)}`;
 }
 
 /** 컬럼 정보를 렌더링한다. */

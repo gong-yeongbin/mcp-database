@@ -1,16 +1,8 @@
 // SQL Server 에 접속해 스키마 조회와 쿼리 실행을 담당하는 드라이버
 
 import sql from 'mssql';
-import type {
-    Column,
-    Driver,
-    Parameter,
-    ProcedureRef,
-    ProcedureResult,
-    QueryResult,
-    TableRef,
-} from './driver.ts';
-import { assertProcedureCall, assertReadOnly } from './driver.ts';
+import type { Column, Driver, QueryResult, TableRef } from './driver.ts';
+import { assertReadOnly } from './driver.ts';
 
 const LIST_TABLES = `
 SELECT TABLE_SCHEMA AS [schema], TABLE_NAME AS [name], TABLE_TYPE AS [type]
@@ -42,49 +34,9 @@ WHERE c.TABLE_SCHEMA = @schema AND c.TABLE_NAME = @table
 ORDER BY c.ORDINAL_POSITION
 `;
 
-const LIST_PROCEDURES = `
-SELECT s.name AS [schema], p.name AS [name], p.modify_date AS [modifyDate]
-FROM sys.procedures p
-JOIN sys.schemas s ON s.schema_id = p.schema_id
-ORDER BY s.name, p.name
-`;
-
-const DESCRIBE_PROCEDURE = `
-SELECT
-  pr.name                       AS [name],
-  TYPE_NAME(pr.user_type_id)    AS [type],
-  pr.max_length                 AS [maxLength],
-  pr.is_output                  AS [isOutput]
-FROM sys.procedures p
-JOIN sys.schemas s    ON s.schema_id = p.schema_id
-JOIN sys.parameters pr ON pr.object_id = p.object_id
-WHERE s.name = @schema AND p.name = @name
-ORDER BY pr.parameter_id
-`;
-
-/**
- * arrayRowMode 결과를 QueryResult 로 변환한다.
- *
- * @types/mssql 12.3 의 IResult 에는 columns 가 없어 캐스팅한다.
- * columns 는 recordset 별 배열이라 첫 번째만 쓴다.
- */
-function toQueryResult(result: sql.IResult<unknown>, maxRows: number): QueryResult {
-    const meta = (result as unknown as { columns?: sql.IColumnMetadata[] }).columns?.[0];
-    const columns = meta ? Object.values(meta).sort((a, b) => a.index - b.index).map((c) => c.name) : [];
-
-    const all = (result.recordset ?? []) as unknown as unknown[][];
-    const totalRows = all.length;
-    const truncated = totalRows > maxRows;
-    const rows = truncated ? all.slice(0, maxRows) : all;
-
-    return {
-        columns,
-        rows,
-        rowCount: rows.length,
-        totalRows,
-        truncated,
-        multipleResultSets: (result.recordsets as unknown[]).length > 1,
-    };
+/** arrayRowMode 의 컬럼 메타데이터(이름 → {index, name})를 순서대로 이름 배열로 바꾼다. */
+function columnNames(meta: sql.IColumnMetadata): string[] {
+    return Object.values(meta).sort((a, b) => a.index - b.index).map((c) => c.name);
 }
 
 export class MssqlDriver implements Driver {
@@ -144,6 +96,13 @@ export class MssqlDriver implements Driver {
         }));
     }
 
+    /**
+     * 스트리밍으로 받다가 maxRows 를 넘는 행이 오면 요청을 취소한다.
+     *
+     * 전체를 받은 뒤 자르면 큰 테이블에서 수백만 행이 네트워크를 탄다.
+     * cancel() 은 ECANCEL 에러를 'error' 이벤트로 보내고 'done' 으로 끝나며
+     * 커넥션은 풀로 돌아간다. 우리가 낸 취소이므로 그 에러는 무시한다.
+     */
     async query(
         text: string,
         params: Record<string, unknown>,
@@ -153,60 +112,44 @@ export class MssqlDriver implements Driver {
 
         const pool = await this.getPool();
         const request = pool.request();
+        request.stream = true;
         request.arrayRowMode = true;
         for (const [k, v] of Object.entries(params)) {
             request.input(k, v);
         }
 
-        const result = await request.query(text);
-        return toQueryResult(result, maxRows);
-    }
+        return new Promise<QueryResult>((resolve, reject) => {
+            let columns: string[] = [];
+            const rows: unknown[][] = [];
+            let truncated = false;
+            let error: Error | undefined;
 
-    async listProcedures(): Promise<ProcedureRef[]> {
-        const pool = await this.getPool();
-        const result = await pool.request().query<ProcedureRef>(LIST_PROCEDURES);
-        return result.recordset;
-    }
-
-    async describeProcedure(schema: string, name: string): Promise<Parameter[]> {
-        const pool = await this.getPool();
-        const result = await pool
-            .request()
-            .input('schema', sql.NVarChar, schema)
-            .input('name', sql.NVarChar, name)
-            .query<{
-                name: string;
-                type: string;
-                maxLength: number | null;
-                isOutput: boolean;
-            }>(DESCRIBE_PROCEDURE);
-
-        return result.recordset.map((r) => ({
-            name: r.name,
-            type: r.type,
-            maxLength: r.maxLength,
-            isOutput: Boolean(r.isOutput),
-        }));
-    }
-
-    /**
-     * EXEC 문장을 그대로 실행한다.
-     *
-     * 프로시저는 결과 집합을 돌려줄 수도 있고 행만 바꿀 수도 있어
-     * 둘 다 보고한다. 값이 SQL 텍스트에 박히는 형태라서 호출자가
-     * 이스케이프를 책임진다.
-     */
-    async callProcedure(text: string, maxRows: number): Promise<ProcedureResult> {
-        assertProcedureCall(text, 'mssql');
-
-        const pool = await this.getPool();
-        const request = pool.request();
-        request.arrayRowMode = true;
-
-        const result = await request.query(text);
-        const rowsAffected = result.rowsAffected.reduce((a, b) => a + b, 0);
-
-        return { result: toQueryResult(result, maxRows), rowsAffected };
+            request.on('recordset', (meta: sql.IColumnMetadata) => {
+                columns = columnNames(meta);
+            });
+            request.on('row', (row: unknown[]) => {
+                if (truncated) return;
+                if (rows.length < maxRows) {
+                    rows.push(row);
+                    return;
+                }
+                truncated = true;
+                request.cancel();
+            });
+            request.on('error', (e: Error & { code?: string }) => {
+                if (truncated && e.code === 'ECANCEL') return;
+                error ??= e;
+            });
+            request.on('done', () => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve({ columns, rows, rowCount: rows.length, truncated });
+            });
+            // stream 모드에서는 promise 가 거부되지 않고 'error' 이벤트로만 온다.
+            void request.query(text);
+        });
     }
 
     async close(): Promise<void> {
