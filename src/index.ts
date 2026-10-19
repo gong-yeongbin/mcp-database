@@ -1,14 +1,10 @@
 #!/usr/bin/env node
 // MCP 서버 엔트리. tool 을 등록하고 stdio 로 요청을 받는다.
 
-<<<<<<< HEAD
 import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-=======
-import { createRequire } from 'node:module';
->>>>>>> 644d434 (feat: 프로시저 tool 을 제거하고 query 수신 경로를 최적화)
 import { McpServer } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod';
@@ -36,14 +32,6 @@ export interface ServerOpts {
     /** describe 계열 tool 의 기본 스키마. mssql=dbo, postgres=public, mysql=접속 DB */
     defaultSchema: string;
 }
-
-<<<<<<< HEAD
-export function buildServer(driver: Driver, opts: ServerOpts): McpServer {
-    const server = new McpServer({ name: '@dudqls816/database-mcp', version });
-=======
-// rootDir 이 src 라 package.json 을 import 할 수 없어 require 로 읽는다. dist 와 src 양쪽에서 ../ 다.
-const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
->>>>>>> 644d434 (feat: 프로시저 tool 을 제거하고 query 수신 경로를 최적화)
 
 export function buildServer(driver: Driver, opts: ServerOpts): McpServer {
     const server = new McpServer({ name: '@dudqls816/database-mcp', version });
