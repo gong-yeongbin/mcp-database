@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0](https://github.com/gong-yeongbin/mcp-database/compare/v0.3.2...v0.4.0) (2026-10-19)
+
+### Features
+
+* 프로시저 tool 을 제거하고 query 수신 경로를 최적화 ([6e39289](https://github.com/gong-yeongbin/mcp-database/commit/6e392897522be5243bd1ced1e25d0cf3a2c76963))
+
+### Bug Fixes
+
+* index.ts 에 남은 충돌 마커를 제거 ([71c0de5](https://github.com/gong-yeongbin/mcp-database/commit/71c0de594bd8931178621663a4f762e1c11cb1c3))
+
 ## [0.3.2](https://github.com/gong-yeongbin/mcp-database/compare/v0.3.1...v0.3.2) (2026-08-29)
 
 ### Bug Fixes
