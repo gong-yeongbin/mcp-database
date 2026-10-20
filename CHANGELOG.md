@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.2](https://github.com/gong-yeongbin/mcp-database/compare/v1.0.1...v1.0.2) (2026-10-20)
+
+### Bug Fixes
+
+* MCP 레지스트리 점검 지적 사항을 해소 ([dbf505b](https://github.com/gong-yeongbin/mcp-database/commit/dbf505bbf54fefb5eadcf87071e143a1ac9b9b5a))
+
 ## [1.0.1](https://github.com/gong-yeongbin/mcp-database/compare/v1.0.0...v1.0.1) (2026-10-20)
 
 ### Bug Fixes
