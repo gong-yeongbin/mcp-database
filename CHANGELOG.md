@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.1](https://github.com/gong-yeongbin/mcp-database/compare/v1.0.0...v1.0.1) (2026-10-20)
+
+### Bug Fixes
+
+* **deps:** MCP SDK 2.3.1 로 올리고 dev 종속성 취약점을 해소 ([ca6345e](https://github.com/gong-yeongbin/mcp-database/commit/ca6345e2831cc58cbdaa973ce5eca74a2b3d4784))
+
 ## [1.0.0](https://github.com/gong-yeongbin/mcp-database/compare/v0.4.0...v1.0.0) (2026-10-19)
 
 ### ⚠ BREAKING CHANGES
