@@ -41,7 +41,8 @@ export function buildServer(driver: Driver, opts: ServerOpts): McpServer {
         {
             title: '테이블 목록',
             description: '데이터베이스의 모든 테이블과 뷰를 스키마와 함께 나열합니다.',
-            annotations: { readOnlyHint: true },
+            inputSchema: z.object({}),
+            annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         },
         () => guard(async () => formatTableList(await driver.listTables())),
     );
@@ -58,7 +59,7 @@ export function buildServer(driver: Driver, opts: ServerOpts): McpServer {
                     .default(opts.defaultSchema)
                     .describe(`스키마 이름. 기본값 ${opts.defaultSchema}`),
             }),
-            annotations: { readOnlyHint: true },
+            annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         },
         ({ table, schema }) =>
             guard(async () => formatColumns(schema, table, await driver.describeTable(schema, table))),
@@ -85,7 +86,7 @@ export function buildServer(driver: Driver, opts: ServerOpts): McpServer {
                     .optional()
                     .describe(`반환할 최대 행 수. 기본값 ${opts.maxRows}`),
             }),
-            annotations: { readOnlyHint: true },
+            annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         },
         ({ sql, params, maxRows }) =>
             guard(async () =>
