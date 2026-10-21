@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.0](https://github.com/gong-yeongbin/mcp-database/compare/v1.0.2...v1.1.0) (2026-10-21)
+
+### Features
+
+* query 를 읽기 전용 트랜잭션으로 감싸 SELECT 모양의 쓰기를 막는다 ([730cd92](https://github.com/gong-yeongbin/mcp-database/commit/730cd924c68ca513269cd4895274c4e611a7c2db))
+
 ## [1.0.2](https://github.com/gong-yeongbin/mcp-database/compare/v1.0.1...v1.0.2) (2026-10-20)
 
 ### Bug Fixes
