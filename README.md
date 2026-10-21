@@ -227,8 +227,10 @@ claude mcp remove dudqls816-database -s local
 **쓰기 차단은 편의 기능이고, 실제 통제는 DB 계정이다.**
 
 임의 SQL 을 실행하는 tool 은 등록 자체가 되지 않는다. `query` 는 여러 문장,
-`SELECT`/`WITH` 로 시작하지 않는 문장, 쓰기 키워드를 방언별 규칙으로 거부한다. 다만 문자열
-검사로 SQL 의 모든 부수 효과를 막을 수는 없다. **이 가드는 LLM 의 실수를 막는 장치이고 보안 경계가 아니다.**
+`SELECT`/`WITH` 로 시작하지 않는 문장, 쓰기 키워드를 방언별 규칙으로 거부하고, 통과한 문장은
+트랜잭션 안에서 실행한 뒤 항상 되돌린다. PostgreSQL 과 MySQL 은 읽기 전용 트랜잭션이라 안에서
+쓰기를 시도하면 엔진이 거부한다. 다만 트랜잭션 밖에서 일어나는 효과까지 막을 수는 없다.
+**이 가드는 LLM 의 실수를 막는 장치이고 보안 경계가 아니다.**
 
 Claude Code 의 `permissions` 설정으로 tool 호출을 추가로 막을 수도 있으나, 그것은 Claude 가
 이 서버를 통해 부르는 호출만 막는 편의 층이다. 이 문서는 우회가 불가능한 DB 계정 권한만 다룬다.
@@ -264,27 +266,38 @@ DATABASE_URL='mssql://sa:pw@localhost:1433/mydb' npx @dudqls816/database-mcp
 
 **4. `query` 의 키워드 검사는 문자열 매칭이다.**
 `assertReadOnly` 는 주석과 문자열 리터럴을 제거한 뒤 `SELECT` 또는 `WITH` 로 시작하는지 보고
-쓰기 키워드가 있는지 본다. 이 검사를 통과하면서 읽기 범위를 벗어나는 SQL 이 존재한다.
-아래는 모두 현재 가드를 **통과한다**.
+쓰기 키워드가 있는지 본다. 키워드 목록(`INSERT`, `UPDATE`, `DELETE`, `EXEC`, `DROP` 등)에
+없는 수단은 걸러지지 않고, 목록을 늘려도 파서가 아니라 문자열 검사이므로 완전해질 수 없다.
+
+그래서 검사를 통과한 문장은 트랜잭션으로 감싸 실행하고 항상 `ROLLBACK` 한다. PostgreSQL 은
+`BEGIN READ ONLY`, MySQL 은 `START TRANSACTION READ ONLY` 로 열어, 가드를 지난 쓰기를
+엔진이 거부한다. 아래는 가드를 **통과하지만** 읽기 전용 트랜잭션이 막는다.
 
 ```sql
-SELECT * FROM OPENROWSET('SQLNCLI', '...', 'SELECT 1')  -- 외부 데이터 원본
-SELECT * FROM OPENQUERY(linked_server, 'SELECT 1')      -- 링크드 서버 경유
-SELECT dbo.SideEffectFn(1)                              -- 부수 효과가 있는 사용자 함수
-SELECT * FROM sys.sql_logins                            -- 시스템 카탈로그 열람
+SELECT side_effect_fn(1)   -- 안에서 INSERT 하는 사용자 함수. 엔진이 거부한다
+SELECT nextval('seq')      -- 시퀀스 값 소비 (PostgreSQL). 엔진이 거부한다
 ```
 
-키워드 목록(`INSERT`, `UPDATE`, `DELETE`, `EXEC`, `DROP` 등)에 없는 수단은 걸러지지 않는다.
-목록을 늘려도 근본적으로 파서가 아니라 문자열 검사이므로 완전해질 수 없다. PostgreSQL 의
-`dblink`/FDW 경유 실행, MySQL·PostgreSQL 의 부수 효과 있는 사용자 함수도 같은 이유로
-가드를 통과한다.
+SQL Server 에는 읽기 전용 트랜잭션 모드가 없다. 일반 트랜잭션으로 열고 `ROLLBACK` 하므로
+쓰기가 일어나도 반영되지 않지만, 거부하지는 못한다.
+
+트랜잭션 **밖**에서 일어나는 효과는 어느 방언에서도 막지 못한다. 아래는 모두 가드와
+트랜잭션을 지나 그대로 실행된다.
+
+```sql
+SELECT dblink_exec('...', 'INSERT INTO t VALUES (1)')  -- 원격 서버에 쓰기 (PostgreSQL dblink/FDW)
+SELECT * FROM OPENROWSET('SQLNCLI', '...', 'SELECT 1') -- 외부 데이터 원본 (SQL Server)
+SELECT * FROM OPENQUERY(linked_server, 'SELECT 1')     -- 링크드 서버 경유 (SQL Server)
+SELECT NEXT VALUE FOR seq                              -- 시퀀스 값 소비 (SQL Server). 롤백되지 않는다
+SELECT * FROM sys.sql_logins                           -- 시스템 카탈로그 열람
+```
 
 정리하면 이렇다.
 
 | 통제 | 우회 |
 | --- | --- |
 | 임의 SQL tool 부재 | 1~3 전부 |
-| `query` 의 읽기 전용 가드 | 4 |
+| `query` 의 읽기 전용 가드와 트랜잭션 | 4 |
 | **DB 계정 권한** | **없음** |
 
 ### DB 권한으로 좁히기

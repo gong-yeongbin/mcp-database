@@ -107,6 +107,9 @@ export class PostgresDriver implements Driver {
         // pg 내장 Query 의 rows 옵션은 suspended 되면 스스로 다시 받아서 멈출 수 없다.
         const client = await this.getPool().connect();
         try {
+            // 읽기 전용 트랜잭션. 문자열 가드가 놓친 "SELECT 모양의 쓰기"(부수 효과 함수 등)를 엔진이 거부한다.
+            // 세션 설정(default_transaction_read_only)은 set_config 로 뒤집힐 수 있어 쿼리마다 명시적으로 연다.
+            await client.query('BEGIN READ ONLY');
             const cursor = client.query(new Cursor<unknown[]>(bound.text, bound.values, { rowMode: 'array' }));
             const { rows, fields } = await new Promise<{ rows: unknown[][]; fields: pg.FieldDef[] }>(
                 (resolve, reject) => {
@@ -119,7 +122,13 @@ export class PostgresDriver implements Driver {
             await cursor.close();
             return toQueryResult(rows, fields, maxRows);
         } finally {
-            client.release();
+            // 성공이든 실패든 되돌린다. ROLLBACK 자체가 실패하면 커넥션이 망가진 것이라 풀에서 버린다.
+            try {
+                await client.query('ROLLBACK');
+                client.release();
+            } catch (e) {
+                client.release(e instanceof Error ? e : new Error(String(e)));
+            }
         }
     }
 

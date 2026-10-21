@@ -94,37 +94,51 @@ export class MysqlDriver implements Driver {
         // promise 래퍼의 .connection 은 core 커넥션인데 타입이 promise 쪽으로 잡혀 있어 캐스팅한다.
         const conn = await this.getPool().getConnection();
         const core = conn.connection as unknown as CoreConnection;
+        let truncated = false;
 
-        return new Promise<QueryResult>((resolve, reject) => {
-            let columns: string[] = [];
-            const rows: unknown[][] = [];
-            let settled = false;
+        try {
+            // 읽기 전용 트랜잭션. 문자열 가드가 놓친 "SELECT 모양의 쓰기"(부수 효과 함수 등)를 엔진이 거부한다.
+            await conn.query('START TRANSACTION READ ONLY');
 
-            const finish = (truncated: boolean) => {
-                if (settled) return;
-                settled = true;
-                if (truncated) conn.destroy();
-                else conn.release();
-                resolve({ columns, rows, rowCount: rows.length, truncated });
-            };
+            return await new Promise<QueryResult>((resolve, reject) => {
+                let columns: string[] = [];
+                const rows: unknown[][] = [];
+                let settled = false;
 
-            const q = core.query({ sql: bound.text, rowsAsArray: true }, bound.values);
-            q.on('fields', (fields: FieldPacket[]) => {
-                columns = fields.map((f) => f.name);
+                const finish = (hitLimit: boolean) => {
+                    if (settled) return;
+                    settled = true;
+                    truncated = hitLimit;
+                    // 끊긴 커넥션의 트랜잭션은 서버가 롤백한다.
+                    if (hitLimit) conn.destroy();
+                    resolve({ columns, rows, rowCount: rows.length, truncated });
+                };
+
+                const q = core.query({ sql: bound.text, rowsAsArray: true }, bound.values);
+                q.on('fields', (fields: FieldPacket[]) => {
+                    columns = fields.map((f) => f.name);
+                });
+                q.on('result', (row: unknown) => {
+                    if (settled) return;
+                    if (rows.length < maxRows) rows.push(row as unknown[]);
+                    else finish(true);
+                });
+                q.on('end', () => finish(false));
+                q.on('error', (e: Error) => {
+                    if (settled) return;
+                    settled = true;
+                    reject(e);
+                });
             });
-            q.on('result', (row: unknown) => {
-                if (settled) return;
-                if (rows.length < maxRows) rows.push(row as unknown[]);
-                else finish(true);
-            });
-            q.on('end', () => finish(false));
-            q.on('error', (e: Error) => {
-                if (settled) return;
-                settled = true;
-                conn.release();
-                reject(e);
-            });
-        });
+        } finally {
+            // 성공이든 실패든 되돌린다. ROLLBACK 자체가 실패하면 커넥션이 망가진 것이라 버린다.
+            if (!truncated) {
+                await conn.query('ROLLBACK').then(
+                    () => conn.release(),
+                    () => conn.destroy(),
+                );
+            }
+        }
     }
 
     async close(): Promise<void> {

@@ -102,6 +102,10 @@ export class MssqlDriver implements Driver {
      * 전체를 받은 뒤 자르면 큰 테이블에서 수백만 행이 네트워크를 탄다.
      * cancel() 은 ECANCEL 에러를 'error' 이벤트로 보내고 'done' 으로 끝나며
      * 커넥션은 풀로 돌아간다. 우리가 낸 취소이므로 그 에러는 무시한다.
+     *
+     * 쿼리는 트랜잭션 안에서 실행하고 항상 되돌린다. SQL Server 에는 읽기 전용
+     * 트랜잭션 모드가 없어 pg/mysql 처럼 거부하지는 못하지만, 문자열 가드를 지난
+     * 쓰기가 있어도 반영되지는 않는다.
      */
     async query(
         text: string,
@@ -111,7 +115,9 @@ export class MssqlDriver implements Driver {
         assertReadOnly(text, 'mssql');
 
         const pool = await this.getPool();
-        const request = pool.request();
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        const request = tx.request();
         request.stream = true;
         request.arrayRowMode = true;
         for (const [k, v] of Object.entries(params)) {
@@ -141,11 +147,14 @@ export class MssqlDriver implements Driver {
                 error ??= e;
             });
             request.on('done', () => {
-                if (error) {
-                    reject(error);
-                    return;
-                }
-                resolve({ columns, rows, rowCount: rows.length, truncated });
+                // 서버가 먼저 중단한 트랜잭션(EABORT)은 라이브러리가 커넥션을 이미 돌려놓았다. 롤백 실패는 무시한다.
+                void tx.rollback().catch(() => {}).then(() => {
+                    if (error) {
+                        reject(error);
+                        return;
+                    }
+                    resolve({ columns, rows, rowCount: rows.length, truncated });
+                });
             });
             // stream 모드에서는 promise 가 거부되지 않고 'error' 이벤트로만 온다.
             void request.query(text);
