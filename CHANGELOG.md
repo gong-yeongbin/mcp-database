@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.1](https://github.com/gong-yeongbin/mcp-database/compare/v1.1.0...v1.1.1) (2026-10-28)
+
+### Bug Fixes
+
+* zod 를 4.6.6 이상으로 올려 GHSA-mrhx-c7xc-m3w5 를 해소 ([c542efc](https://github.com/gong-yeongbin/mcp-database/commit/c542efc000d98c0c170ad2fe9c3208e58ce5c99a))
+
 ## [1.1.0](https://github.com/gong-yeongbin/mcp-database/compare/v1.0.2...v1.1.0) (2026-10-21)
 
 ### Features
